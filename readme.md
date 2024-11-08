@@ -42,3 +42,15 @@ Fully Connected Layer
 
 # CNN (Convolution Neural Network, 합성곱 신경망)
 주로 이미지 인식, 영상 분석, 객체 탐지 등 시각적 데이터를 처리
+
+```Python
+import tiktoken
+enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+
+encoded_text = enc.encode(nodes[0].text)
+print(f"Encoded text: {encoded_text}")
+print(f"Encoded text length: {len(encoded_text)}")
+
+decoded_text = enc.decode(encoded_text)
+print(f"Decoded text: \n\n{decoded_text}")
+```
