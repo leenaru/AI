@@ -133,3 +133,205 @@ print("Similarity scores:", similarity_scores)
 ✅ **학습 후 모델을 저장하고 다시 로드하여 추론 가능**
 
 이제 이 코드로 MobileCLIP을 LoRA와 함께 학습할 수 있어요! 🚀😊
+
+---
+---
+---
+아래는 `tqdm`을 사용한 **MobileCLIP + LoRA + Contrastive Loss 학습 과정**을 **시각화**하는 코드입니다.  
+
+### ✅ **추가된 시각화 기능**
+- `matplotlib`을 사용하여 **Loss 변화 그래프 출력**
+- `seaborn`을 활용해 **학습 안정성을 시각적으로 표현**
+- `similarity_scores` 히트맵 시각화  
+
+---
+
+## **🔥 MobileCLIP + LoRA + Contrastive Loss 학습 + 시각화 코드**
+```python
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from transformers import CLIPProcessor, CLIPModel
+from peft import get_peft_model, LoraConfig, TaskType
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# MobileCLIP 모델 로드
+model_name = "apple/ml-mobileclip"  # 실제 사용 가능한 MobileCLIP 모델로 변경 필요
+model = CLIPModel.from_pretrained(model_name)
+processor = CLIPProcessor.from_pretrained(model_name)
+
+# LoRA 설정 및 적용
+lora_config = LoraConfig(
+    task_type=TaskType.FEATURE_EXTRACTION,
+    r=8,  
+    lora_alpha=32,  
+    lora_dropout=0.1,
+    target_modules=["text_model.encoder.layers", "vision_model.encoder.layers"],  
+)
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+
+# 모델을 학습 모드로 설정
+model.train()
+
+# 디바이스 설정
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model.to(device)
+
+# 텍스트 임베딩 미리 계산
+class_labels = ["a cat", "a dog", "a car", "a tree"]
+text_inputs = processor(text=class_labels, return_tensors="pt", padding=True).to(device)
+
+with torch.no_grad():
+    text_outputs = model.get_text_features(**text_inputs)  
+    text_features = F.normalize(text_outputs, dim=-1)  
+
+text_features = text_features.clone().detach().requires_grad_(True)
+
+# 데이터셋 & 데이터로더 정의
+class DummyDataset(torch.utils.data.Dataset):
+    def __init__(self, processor, num_samples=100):
+        self.processor = processor
+        self.num_samples = num_samples
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        image = torch.randn(3, 224, 224)  
+        label = torch.randint(0, len(class_labels), (1,)).item()
+        return {"image": image, "label": label}
+
+train_dataset = DummyDataset(processor)
+train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, drop_last=True)
+
+# 옵티마이저 설정
+optimizer = optim.AdamW(model.parameters(), lr=5e-5)
+
+# Loss 기록을 위한 리스트
+loss_history = []
+
+# 학습 루프
+num_epochs = 3
+for epoch in range(num_epochs):
+    epoch_loss = 0  
+    progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=True)
+
+    for batch in progress_bar:
+        images = batch["image"].to(device)
+        labels = batch["label"].to(device)
+
+        # 이미지 특징 추출
+        image_inputs = processor(images=images, return_tensors="pt").to(device)
+        image_features = model.get_image_features(**image_inputs)
+
+        # Normalize features
+        image_features = F.normalize(image_features, dim=-1)
+        image_features.requires_grad_(True)
+
+        # Similarity matrix 계산
+        logit_scale = model.logit_scale.exp()
+        logits_per_image = logit_scale * image_features @ text_features.T
+
+        # labels 크기 조정
+        if labels.dim() > 1:
+            labels = labels.squeeze(1)
+        if labels.dim() > 1:
+            labels = labels.argmax(dim=-1)  
+
+        # Cross-entropy loss 계산
+        loss_img = F.cross_entropy(logits_per_image, labels.long())
+        epoch_loss += loss_img.item()
+
+        # Loss 저장 (시각화를 위해)
+        loss_history.append(loss_img.item())
+
+        # Backward & Optimization
+        optimizer.zero_grad()
+        loss_img.backward()
+        optimizer.step()
+
+        # tqdm에 현재 Loss 표시
+        progress_bar.set_postfix(loss=f"{loss_img.item():.4f}")
+
+    print(f"Epoch {epoch+1} completed. Avg Loss: {epoch_loss / len(train_dataloader):.4f}")
+
+# 학습된 모델 저장
+model.save_pretrained("mobileclip_lora")
+processor.save_pretrained("mobileclip_lora")
+
+# 모델 로드 및 테스트
+model = CLIPModel.from_pretrained("mobileclip_lora")
+processor = CLIPProcessor.from_pretrained("mobileclip_lora")
+
+test_image = torch.randn(3, 224, 224)
+image_inputs = processor(images=[test_image], return_tensors="pt").to(device)
+
+with torch.no_grad():
+    image_features = model.get_image_features(**image_inputs)
+    image_features = F.normalize(image_features, dim=-1)
+    similarity_scores = image_features @ text_features.T  
+
+print("Similarity scores:", similarity_scores)
+
+# 📊 Loss 변화 시각화
+plt.figure(figsize=(10, 5))
+plt.plot(loss_history, label="Training Loss", color='b')
+plt.xlabel("Iterations")
+plt.ylabel("Loss")
+plt.title("Training Loss Over Time")
+plt.legend()
+plt.show()
+
+# 🔥 Similarity Score 히트맵 시각화
+plt.figure(figsize=(6, 5))
+sns.heatmap(similarity_scores.cpu().numpy(), annot=True, fmt=".2f", cmap="coolwarm", xticklabels=class_labels, yticklabels=["Test Image"])
+plt.title("Image-Text Similarity Scores")
+plt.xlabel("Text Labels")
+plt.ylabel("Image")
+plt.show()
+```
+
+---
+
+## **🚀 추가된 시각화**
+### **📊 1. 학습 Loss 변화 그래프**
+```python
+plt.figure(figsize=(10, 5))
+plt.plot(loss_history, label="Training Loss", color='b')
+plt.xlabel("Iterations")
+plt.ylabel("Loss")
+plt.title("Training Loss Over Time")
+plt.legend()
+plt.show()
+```
+- **Loss의 감소 여부를 확인**하여 모델 학습이 정상적으로 이루어지는지 체크 가능  
+- `loss_history` 리스트를 사용하여 모든 Iteration 동안 기록된 `loss`를 시각화  
+
+---
+
+### **🔥 2. 이미지-텍스트 유사도 히트맵**
+```python
+plt.figure(figsize=(6, 5))
+sns.heatmap(similarity_scores.cpu().numpy(), annot=True, fmt=".2f", cmap="coolwarm", xticklabels=class_labels, yticklabels=["Test Image"])
+plt.title("Image-Text Similarity Scores")
+plt.xlabel("Text Labels")
+plt.ylabel("Image")
+plt.show()
+```
+- 테스트 이미지와 텍스트 간의 유사도를 **히트맵(Heatmap)으로 시각화**  
+- `similarity_scores`를 `seaborn.heatmap()`을 사용해 시각적으로 표현  
+- 밝은 색상은 높은 유사도를, 어두운 색상은 낮은 유사도를 나타냄  
+
+---
+
+## **🚀 기대 효과**
+✅ `tqdm`을 활용해 학습 진행률을 직관적으로 확인  
+✅ `matplotlib`을 이용한 **Loss 변화 시각화**로 학습 품질 확인  
+✅ `seaborn`을 활용한 **이미지-텍스트 유사도 히트맵**으로 성능 평가  
+✅ **MobileCLIP + LoRA 모델 학습을 효과적으로 시각화하고 검증 가능**  
+
+이제 학습 과정을 **실시간으로 모니터링**하고, 학습 결과를 **시각적으로 분석**할 수 있어요! 🚀🔥
