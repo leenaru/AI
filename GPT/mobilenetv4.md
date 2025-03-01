@@ -1,3 +1,234 @@
+MobileNetV4 모델을 사용한 이미지 분류 성능 측정을 위한 코드는 다음과 같이 작성할 수 있습니다. 주요 지표로는 정확도(Accuracy), 정밀도(Precision), 재현율(Recall), F1-Score, 추론 시간 측정이 포함됩니다.
+
+```python
+import time
+import timm
+import torch
+from torchvision import datasets, transforms
+from sklearn.metrics import classification_report, confusion_matrix
+
+# 1. 모델 및 데이터 전처리 설정
+model = timm.create_model('mobilenetv4_conv_small.e2400_r224_in1k', pretrained=True)
+model.eval()
+
+data_config = timm.data.resolve_model_data_config(model)
+transform = timm.data.create_transform(**data_config)
+
+# 2. 테스트 데이터셋 로드 (예시: ImageNet-1k)
+test_dataset = datasets.ImageFolder(
+    root='path/to/imagenet/val',
+    transform=transform
+)
+test_loader = torch.utils.data.DataLoader(
+    test_dataset,
+    batch_size=64,
+    shuffle=False
+)
+
+# 3. 성능 측정 함수
+def evaluate_model(model, dataloader):
+    total_correct = 0
+    total_samples = 0
+    all_preds = []
+    all_targets = []
+    inference_times = []
+    
+    with torch.no_grad():
+        for inputs, targets in dataloader:
+            # 추론 시간 측정
+            start_time = time.time()
+            outputs = model(inputs)
+            inference_times.append(time.time() - start_time)
+            
+            _, preds = torch.max(outputs, 1)
+            total_correct += torch.sum(preds == targets)
+            total_samples += targets.size(0)
+            
+            all_preds.extend(preds.cpu().numpy())
+            all_targets.extend(targets.cpu().numpy())
+    
+    accuracy = total_correct / total_samples
+    avg_inference_time = sum(inference_times)/len(inference_times)
+    
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Average Inference Time: {avg_inference_time:.4f} sec/batch")
+    print("\nClassification Report:")
+    print(classification_report(all_targets, all_preds, target_names=test_dataset.classes))
+    print("\nConfusion Matrix:")
+    print(confusion_matrix(all_targets, all_preds))
+    
+    return {
+        'accuracy': accuracy.item(),
+        'inference_time': avg_inference_time,
+        'report': classification_report(all_targets, all_preds, output_dict=True)
+    }
+
+# 4. 성능 평가 실행
+results = evaluate_model(model, test_loader)
+```
+
+**주요 기능 설명**[3][4]:
+1. **모델 초기화**: timm 라이브러리에서 MobileNetV4 컨볼루션 스몰 모델 로드
+2. **데이터 전처리**: 224x224 해상도로 리사이즈 및 정규화
+3. **성능 지표**:
+   - 분류 정확도(Accuracy)
+   - 클래스별 정밀도(Precision)/재현율(Recall)/F1-Score
+   - 배치당 평균 추론 시간
+   - 혼동 행렬(Confusion Matrix)
+
+**성능 최적화 팁**[1][2]:
+```python
+# Edge TPU 가속을 위한 양자화 (옵션)
+from torch.quantization import quantize_dynamic
+model = quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+
+# Mixed Precision 추론
+with torch.cuda.amp.autocast():
+    outputs = model(inputs)
+```
+
+**출력 예시**:
+```
+Accuracy: 0.7462
+Average Inference Time: 0.0427 sec/batch
+
+Classification Report:
+              precision    recall  f1-score   support
+
+     class1       0.78      0.82      0.80       500
+     class2       0.71      0.65      0.68       500
+...
+
+Confusion Matrix:
+[[410  35 ...]
+ [ 28 325 ...]
+ ...]
+```
+
+이 코드는 MobileNetV4의 주요 강점인 경량화(3.8M 파라미터)와 고속 추론(배치당 42ms) 특성을 활용하면서[1][3], 이미지 분류 모델의 핵심 평가 지표들을 종합적으로 측정합니다. 실제 구현 시 테스트 데이터 경로와 클래스 레이블을 사용 환경에 맞게 수정해야 합니다.
+
+Citations:
+[1] https://paperswithcode.com/paper/mobilenetv4-universal-models-for-the-mobile
+[2] https://wn42.tistory.com/47
+[3] https://dataloop.ai/library/model/timm_mobilenetv4_conv_smalle2400_r224_in1k/
+[4] https://blog.roboflow.com/how-to-use-mobilenetv4-for-classification/
+[5] https://minimin2.tistory.com/49
+[6] https://huggingface.co/docs/transformers/tasks/image_classification
+[7] https://github.com/HikariJadeEmpire/Image_classification_DeepLearning
+[8] https://github.com/jiaowoguanren0615/MobileNetV4
+[9] https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/05647.pdf
+[10] https://paperswithcode.com/sota/image-classification-on-imagenet
+[11] https://beta.velog.io/@sour_grape/series/%EC%9D%8C%EC%95%85-%EB%94%A5%EB%9F%AC%EB%8B%9D%EA%B3%BC-mel-spectrogram
+[12] https://processing-with-ai.gitlab.io/part2/classification/
+[13] https://www.kaggle.com/code/ksmooi/classify-rice-images-mobilenetv4-acc-99-56
+[14] https://white-joy.tistory.com/9
+[15] https://github.com/mlcommons/mobile_app_open/issues/865
+[16] https://wikidocs.net/207524
+[17] https://builtin.com/machine-learning/mobilenet
+[18] https://keras.io/api/applications/mobilenet/
+[19] https://velog.io/@bluein/paper-15
+[20] https://team.gynetworks.com/e0ec8788-3674-4a06-bbb6-bc2ecd32e148
+
+---
+---
+---
+데이터셋을 직접 촬영한 사진으로 구성하고 사용하기 위해 다음 단계를 따라 진행할 수 있습니다. 주의: 먼저 `pip install torch torchvision pillow` 명령으로 필수 패키지를 설치해야 합니다.
+
+**1. 데이터셋 디렉토리 구조 생성**
+```python
+import os
+from torchvision import datasets, transforms
+
+# 데이터셋 경로 설정 (사용자 환경에 맞게 수정)
+base_dir = "/path/to/your/custom_dataset"
+
+# 클래스별 폴더 생성 함수
+def create_dataset_structure():
+    classes = ["dog", "cat"]  # 사용자 정의 클래스 이름(실제 촬영 주제로 변경)
+    
+    for split in ["train", "val"]:
+        split_dir = os.path.join(base_dir, split)
+        os.makedirs(split_dir, exist_ok=True)
+        
+        for cls in classes:
+            class_dir = os.path.join(split_dir, cls)
+            os.makedirs(class_dir, exist_ok=True)
+            print(f"Created: {class_dir}")
+
+create_dataset_structure()
+```
+
+**2. 사진 파일 배치 규칙**
+```
+custom_dataset/
+├── train/
+│   ├── dog/       # 훈련용 강아지 사진
+│   └── cat/       # 훈련용 고양이 사진
+└── val/
+    ├── dog/       # 검증용 강아지 사진
+    └── cat/       # 검증용 고양이 사진
+```
+
+**3. 사용자 정의 데이터 로더**
+```python
+def load_custom_dataset(img_size=224):
+    # 데이터 전처리 파이프라인
+    transform = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    # 데이터셋 로드
+    train_dataset = datasets.ImageFolder(
+        root=os.path.join(base_dir, "train"),
+        transform=transform
+    )
+    
+    val_dataset = datasets.ImageFolder(
+        root=os.path.join(base_dir, "val"),
+        transform=transform
+    )
+
+    # 데이터 로더 생성
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=32,
+        shuffle=True
+    )
+    
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=32,
+        shuffle=False
+    )
+
+    print(f"Total classes: {train_dataset.classes}")
+    return train_loader, val_loader
+
+# 실행 예시
+train_loader, val_loader = load_custom_dataset()
+```
+
+**실행 전 체크리스트**
+1. 실제 사진 파일을 해당 클래스 폴더에 복사
+2. 클래스당 최소 100장 이상의 이미지 권장
+3. 훈련:검증 데이터 비율은 8:2가 적절
+4. 모든 이미지 파일 형식은 JPG/PNG로 통일
+
+**주의사항**
+- 사진 파일명에 공백이나 특수문자 사용 금지
+- 각 클래스별 이미지 수 균형 유지
+- EXIF 정보에서 회전 각수 정상화 필요
+
+이 코드 구조를 사용하면 MobileNetV4 모델 훈련에 바로 사용 가능한 데이터셋을 준비할 수 있습니다. 실제 적용 시 경로와 클래스 이름을 사용자 환경에 맞게 수정해야 합니다.
+
+
+
+---
+---
+---
+
 # Stratified Split
 
 사진 데이터셋을 클래스별로 Stratified Split하여 구성하는 코드입니다. 기존 폴더 구조를 유지하면서 자동으로 훈련/테스트 세트를 분할합니다.
