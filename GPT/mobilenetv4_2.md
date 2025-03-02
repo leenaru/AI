@@ -279,3 +279,79 @@ Citations:
 [72] https://lightning.ai/docs/torchmetrics/stable/classification/confusion_matrix.html
 
 ---
+
+훈련 과정의 손실 변화를 시각화하는 코드를 추가해드리겠습니다. 기존 코드에 다음 부분들을 수정/추가하면 됩니다.
+
+```python
+# 기존 코드 상단에 추가
+import matplotlib.pyplot as plt
+
+# 메인 실행 코드 부분 수정
+if __name__ == "__main__":
+    # ... [기존 설정 코드 동일] ...
+    
+    # 학습 루프 수정
+    train_losses = []  # 에포크별 손실값 저장
+
+    for epoch in range(NUM_EPOCHS):
+        model.train()
+        running_loss = 0.0
+        
+        with tqdm(train_loader, unit="batch") as tepoch:
+            for images, labels in tepoch:
+                # ... [기존 학습 코드 동일] ...
+                
+        # 에포크별 평균 손실 계산 및 저장
+        epoch_loss = running_loss / len(train_loader)
+        train_losses.append(epoch_loss)  # 손실값 기록
+        print(f'Epoch {epoch+1} Loss: {epoch_loss:.4f}')
+
+    # 손실 곡선 그리기 함수 추가
+    def plot_loss_curve(losses):
+        plt.figure(figsize=(10, 6))
+        plt.plot(losses, 'b-o', linewidth=2, markersize=8)
+        plt.title('Training Loss Curve')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid(True)
+        plt.xticks(np.arange(0, len(losses)), np.arange(1, len(losses)+1))
+        plt.show()
+
+    # 손실 곡선 표시
+    plot_loss_curve(train_losses)
+    
+    # ... [기존 평가 코드 동일] ...
+```
+
+### 주요 추가 사항 설명
+
+1. **손실 값 추적 시스템**:
+   - `train_losses` 리스트로 각 에포크의 평균 손실값 저장
+   - 매 에포크 종료 시 `append()`로 데이터 누적
+
+2. **시각화 기능 강화**:
+   - `plot_loss_curve()` 함수 구현
+   - 파란색 실선 그래프(`'b-o'`)로 손실 추이 표현
+   - 그리드 라인 추가로 가독성 향상
+   - x축 눈금을 1부터 시작하도록 조정
+
+3. **분석 용이성**:
+   - 과적합 발생 시점 파악 가능
+   - 학습률 조정 필요성 판단
+   - 최적 에포크 수 결정 지원
+
+### 실행 결과 예시
+```
+Epoch 1 Loss: 1.2345
+Epoch 2 Loss: 0.8765
+Epoch 3 Loss: 0.6543
+...
+[출력 예시] (실제 실행시 그래프 창이 별도로 팝업됩니다)
+```
+
+이제 훈련 종료 후 자동으로 손실 곡선이 표시되며, 모델의 수렴 패턴을 시각적으로 분석할 수 있습니다. 그래프를 통해 다음과 같은 정보를 얻을 수 있습니다:
+- 학습이 정상적으로 진행되는지 (단조 감소 형태)
+- 과적합 발생 여부 (검증 손실과의 격차)
+- 조기 종료(early stopping) 적절 시점
+
+---
