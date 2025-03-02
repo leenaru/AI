@@ -780,3 +780,115 @@ Citations:
 
 ---
 
+# 계층별 가중치 감쇠
+
+```python
+import torch
+import torch.nn as nn
+import timm
+from torch.optim import AdamW
+
+# ... (기존 코드 유지)
+
+def initialize_model(num_classes):
+    model = timm.create_model(
+        'mobilenetv4_conv_small',
+        pretrained=True,
+        num_classes=num_classes
+    )
+    return model
+
+def get_layerwise_weight_decay(model, base_wd=0.01, alpha=1.0):
+    parameter_groups = []
+    for i, (name, param) in enumerate(model.named_parameters()):
+        if not param.requires_grad:
+            continue
+
+        # 계층 깊이에 따른 가중치 감쇠 계산
+        layer_depth = i / len(list(model.parameters()))
+        weight_decay = base_wd * (1 + alpha * layer_depth)
+
+        if 'bias' in name or 'bn' in name:
+            # BatchNorm 계층과 편향에는 가중치 감쇠를 적용하지 않음
+            parameter_groups.append({"params": [param], "weight_decay": 0.0})
+        else:
+            parameter_groups.append({"params": [param], "weight_decay": weight_decay})
+
+    return parameter_groups
+
+# 메인 실행 코드 수정
+if __name__ == "__main__":
+    # ... (기존 설정 코드 유지)
+
+    # 모델 초기화
+    model = initialize_model(len(class_names)).to(device)
+
+    # 계층별 가중치 감쇠 파라미터 그룹 생성
+    parameter_groups = get_layerwise_weight_decay(model, base_wd=0.01, alpha=2.0)
+
+    # AdamW 옵티마이저 설정 (계층별 가중치 감쇠 적용)
+    optimizer = AdamW(parameter_groups, lr=0.001, betas=(0.9, 0.999), eps=1e-08)
+
+    # 학습률 스케줄러 (선택사항)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS)
+
+    # 학습 루프
+    for epoch in range(NUM_EPOCHS):
+        model.train()
+        running_loss = 0.0
+        
+        with tqdm(train_loader, unit="batch") as tepoch:
+            for images, labels in tepoch:
+                tepoch.set_description(f"Epoch {epoch+1}/{NUM_EPOCHS}")
+                
+                images = images.to(device)
+                labels = labels.to(device)
+                
+                optimizer.zero_grad()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                
+                running_loss += loss.item()
+                tepoch.set_postfix(loss=loss.item())
+        
+        # 에포크별 평균 손실 계산
+        epoch_loss = running_loss / len(train_loader)
+        print(f'Epoch {epoch+1} Loss: {epoch_loss:.4f}')
+        
+        # 학습률 스케줄러 업데이트
+        scheduler.step()
+
+    # ... (기존 평가 코드 유지)
+```
+
+이 코드에서 주요 변경 사항은 다음과 같습니다:
+
+1. `get_layerwise_weight_decay` 함수 추가:
+   - 모델의 각 계층에 대해 깊이에 따라 가중치 감쇠를 계산합니다.
+   - BatchNorm 계층과 편향에는 가중치 감쇠를 적용하지 않습니다.
+
+2. 옵티마이저 설정 변경:
+   - `get_layerwise_weight_decay` 함수로 생성된 파라미터 그룹을 사용합니다.
+   - AdamW 옵티마이저를 사용하여 가중치 감쇠와 학습률 업데이트를 분리합니다.
+
+3. 하이퍼파라미터:
+   - `base_wd`: 기본 가중치 감쇠 값 (여기서는 0.01로 설정)
+   - `alpha`: 계층 깊이에 따른 가중치 감쇠 증가 비율 (여기서는 2.0으로 설정)
+
+이 방식을 통해 모델의 깊은 계층에는 더 강한 가중치 감쇠가 적용되고, 얕은 계층에는 더 약한 가중치 감쇠가 적용됩니다. 이는 과적합을 효과적으로 제어하면서도 모델의 표현력을 유지하는 데 도움이 됩니다.
+
+추가로, 학습 과정에서 각 계층의 실제 가중치 감쇠 값을 모니터링하고 싶다면, 다음과 같은 코드를 학습 루프 내에 추가할 수 있습니다:
+
+```python
+# 학습 루프 내부
+if epoch % 10 == 0:  # 10 에포크마다 출력
+    print("\nWeight decay values:")
+    for i, group in enumerate(optimizer.param_groups):
+        print(f"Layer {i}: {group['weight_decay']:.4f}")
+```
+
+이렇게 하면 모델 훈련 중 계층별 가중치 감쇠의 적용 상태를 확인할 수 있습니다.
+
+---
