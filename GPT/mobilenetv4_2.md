@@ -590,3 +590,193 @@ for epoch in range(NUM_EPOCHS):
 AdamW 적용 시 기존 Adam 대비 약 15-25%의 정확도 향상을 기대할 수 있으며, 특히 소규모 데이터셋에서 과적합 방지 효과가 두드러집니다. 학습률과 가중치 감쇠 매개변수의 상호작용을 주의 깊게 관찰하면서 튜닝하는 것이 중요합니다.
 
 ---
+
+# Report
+
+PyTorch 모델 성능 평가 지표 측정 코드를 종합적으로 추가해드리겠습니다. TorchMetrics 라이브러리를 활용해 정확도, 정밀도, 재현율, F1 점수 및 실행 시간을 측정하는 시스템을 통합했습니다.
+
+```python
+# 상단 임포트 추가
+from torchmetrics import Accuracy, Precision, Recall, F1Score
+import time
+
+# 성능 평가 함수 수정
+def evaluate_model(model, test_loader, device, class_names):
+    model.eval()
+    all_preds = []
+    all_labels = []
+    
+    # 메트릭 초기화
+    accuracy = Accuracy(task="multiclass", num_classes=len(class_names), average='macro').to(device)
+    precision = Precision(task="multiclass", num_classes=len(class_names), average='macro').to(device)
+    recall = Recall(task="multiclass", num_classes=len(class_names), average='macro').to(device)
+    f1 = F1Score(task="multiclass", num_classes=len(class_names), average='macro').to(device)
+    
+    start_time = time.time()
+    
+    with torch.no_grad():
+        for images, labels in tqdm(test_loader, desc='Testing'):
+            images = images.to(device)
+            labels = labels.to(device)
+            
+            outputs = model(images)
+            _, preds = torch.max(outputs, 1)
+            
+            # 메트릭 업데이트
+            accuracy.update(preds, labels)
+            precision.update(preds, labels)
+            recall.update(preds, labels)
+            f1.update(preds, labels)
+            
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+    
+    elapsed_time = time.time() - start_time
+    
+    # 최종 메트릭 계산
+    metrics = {
+        'Accuracy': accuracy.compute().item(),
+        'Precision': precision.compute().item(),
+        'Recall': recall.compute().item(),
+        'F1': f1.compute().item(),
+        'Time': elapsed_time
+    }
+    
+    # Confusion Matrix 생성
+    cm = confusion_matrix(all_labels, all_preds)
+    plot_confusion_matrix(cm, class_names)
+    
+    return metrics
+
+# 메인 실행 코드 수정
+if __name__ == "__main__":
+    # ... [기존 설정 코드 동일] ...
+    
+    # 학습 시간 측정
+    train_start = time.time()
+    
+    # 학습 루프
+    for epoch in range(NUM_EPOCHS):
+        # ... [기존 학습 코드 동일] ...
+    
+    train_time = time.time() - train_start
+    
+    # 모델 평가
+    test_metrics = evaluate_model(model, test_loader, device, class_names)
+    
+    # 종합 성능 리포트
+    print("\n=== Final Performance Report ===")
+    print(f"Training Time: {train_time:.2f}s")
+    print(f"Test Time: {test_metrics['Time']:.2f}s")
+    print(f"Accuracy: {test_metrics['Accuracy']*100:.2f}%")
+    print(f"Precision: {test_metrics['Precision']:.4f}")
+    print(f"Recall: {test_metrics['Recall']:.4f}")
+    print(f"F1 Score: {test_metrics['F1']:.4f}")
+```
+
+### 주요 추가 기능 설명
+
+1. **통합 성능 지표 시스템**:
+
+   | 메트릭       | 계산 방식              | 구현 라이브러리 |
+   |-------------|-----------------------|----------------|
+   | Accuracy    | Macro Average        | TorchMetrics   |
+   | Precision   | Macro Average        | TorchMetrics   |
+   | Recall      | Macro Average        | TorchMetrics   |
+   | F1 Score    | Macro Average        | TorchMetrics   |
+   | Time        | Epoch 단위 누적       | time module    |
+
+2. **성능 측정 개선점**:
+   ```python
+   # 메트릭 초기화 파라미터
+   task="multiclass"  # 다중 클래스 분류
+   num_classes=N      # 실제 클래스 수
+   average='macro'    # 클래스 균형 고려
+   ```
+
+3. **실행 시간 측정 로직**:
+   ```python
+   # 학습 시간: 전체 훈련 루프 시간
+   # 테스트 시간: 배치 처리 시작부터 결과 출력까지
+   ```
+
+4. **GPU 최적화**:
+   ```python
+   .to(device)  # 메트릭 계산을 모델과 동일 장치로 이동
+   ```
+
+### 출력 결과 예시
+```
+=== Final Performance Report ===
+Training Time: 142.35s
+Test Time: 8.72s
+Accuracy: 89.23%
+Precision: 0.8921
+Recall: 0.8854
+F1 Score: 0.8887
+```
+
+### 설치 요구사항
+```bash
+pip install torchmetrics
+```
+
+### 성능 분석 가이드
+
+1. **지표 해석 기준**:
+   - Accuracy > 85%: 우수
+   - Precision-Recall 차이  0.8: 양호한 모델
+
+2. **문제 진단 패턴**:
+   ```
+   Case 1: High Accuracy, Low F1 → 클래스 불균형
+   Case 2: High Recall, Low Precision → False Positive 많음
+   Case 3: High Precision, Low Recall → False Negative 많음
+   ```
+
+3. **최적화 제안**:
+   ```python
+   # 클래스 가중치 추가 (불균형 데이터셋)
+   class_weights = compute_class_weight('balanced', classes=np.unique(labels), y=labels)
+   criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(device))
+   ```
+
+이제 모델 훈련 후 자동으로 종합 성능 리포트가 생성되며, 각 지표의 상호 관계 분석을 통해 모델 개선 방향을 수립할 수 있습니다.
+
+Citations:
+[1] https://discuss.pytorch.org/t/calculating-precision-recall-and-f1-score-in-case-of-multi-label-classification/28265
+[2] https://devblog.pytorchlightning.ai/torchmetrics-pytorch-metrics-built-to-scale-7091b1bec919
+[3] https://www.squash.io/how-to-measure-elapsed-time-in-python/
+[4] https://www.programiz.com/python-programming/time
+[5] https://pytorch.org/torcheval/stable/generated/torcheval.metrics.functional.multiclass_f1_score.html
+[6] https://www.python-engineer.com/posts/measure-elapsed-time/
+[7] https://torchmetrics.readthedocs.io/en/v0.10.2/classification/precision_recall.html
+[8] https://pythonhow.com/how/measure-elapsed-time-in-python/
+[9] https://torchmetrics.readthedocs.io/en/v0.8.2/classification/f1_score.html
+[10] https://docs.vultr.com/python/examples/measure-the-elapsed-time
+[11] https://pytorch.org/torcheval/main/metric_example.html
+[12] https://pytorch.org/torcheval/main/torcheval.metrics.html
+[13] https://lightning.ai/docs/torchmetrics/stable/classification/f1_score.html
+[14] https://lightning.ai/docs/torchmetrics/stable/gallery/index.html
+[15] https://pytorch.org/torcheval/main/torcheval.metrics.functional.html
+[16] https://www.machinelearningmastery.com/how-to-evaluate-the-performance-of-pytorch-models/
+[17] https://github.com/ultralytics/ultralytics/issues/8709
+[18] https://github.com/Lightning-AI/metrics/issues/746
+[19] https://blog.naver.com/artmancg/223486780862
+[20] https://docs.python.org/ko/3.13/library/time.html
+[21] https://wikidocs.net/15106
+[22] https://toramko.tistory.com/entry/python-%ED%8C%8C%EC%9D%B4%EC%8D%AC-%EC%BD%94%EB%93%9C-%EC%8B%A4%ED%96%89-%EC%8B%9C%EA%B0%84elapsed-time-%EC%B8%A1%EC%A0%95%ED%95%98%EA%B8%B0
+[23] https://ctkim.tistory.com/entry/%ED%8C%8C%EC%9D%B4%EC%8D%AC-time-%EB%AA%A8%EB%93%88
+[24] https://www.programiz.com/python-programming/examples/elapsed-time
+[25] https://responding.tistory.com/60
+[26] https://sentry.io/answers/measure-elapsed-time-in-python/
+[27] https://kkalrak.tistory.com/65
+[28] https://niconicon.tistory.com/6
+[29] https://stackoverflow.com/questions/67959327/how-to-calculate-the-f1-score
+[30] https://github.com/toshas/torch-fidelity
+[31] https://stackoverflow.com/questions/56643503/efficient-metrics-evaluation-in-pytorch
+[32] https://realpython.com/python-time-module/
+[33] https://stackoverflow.com/questions/7370801/how-do-i-measure-elapsed-time-in-python
+
+---
+
