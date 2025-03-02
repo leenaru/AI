@@ -1,13 +1,23 @@
 아래는 요약과 함께 매우 상세하게 작성한 PyTorch 코드 예제입니다.  
-이 코드는 직접 촬영한 이미지들을 폴더 구조(ImageFolder 형식)로 구성한 데이터를 불러와, 데이터셋을 훈련/검증/테스트 세트로 나눈 후, timm 라이브러리의 MobileNetV4 모델을 사용하여 분류를 수행합니다.  
-또한 tqdm을 활용한 진행바, 에폭마다 훈련/검증 손실 그래프 기록, 테스트 결과로 confusion matrix 그리기, Adam/AdamW 옵티마이저 선택, 가중치 감쇠 옵션(true/false) 선택, 그리고 손실 값이 갑자기 튀는 경우를 대비한 gradient clipping 및 NaN 체크 기능, early stopping 기능(검증 성능 개선 없을 시 중단 후 최고 성능 모델 저장 및 복원)까지 모두 포함되어 있습니다.
+이 코드는 직접 촬영한 이미지들을 클래스별 폴더 구조(ImageFolder 형식)로 구성한 데이터를 불러와, 데이터셋을 훈련/검증/테스트 세트로 나눈 후, timm 라이브러리의 MobileNetV4 모델을 사용하여 분류를 수행합니다.  
+또한 tqdm 진행바, 에폭마다 손실 및 검증 정확도 그래프 기록, early stopping(최적 검증 성능 모델 저장 및 복원), 옵티마이저(Adam/AdamW) 선택, 가중치 감쇠 옵션(true/false) 선택, gradient clipping, 손실 튀는 경우 NaN 체크, 그리고 테스트 후 Accuracy, Precision, Recall, F1, elapsed time 등의 metric를 측정 및 출력하고 Confusion Matrix를 그리는 코드가 모두 포함되어 있습니다.
 
 ---
 
-## 상세 코드 설명
+## 요약  
+- **데이터셋 구성:** 직접 촬영한 이미지들을 ImageFolder 구조로 불러와 train/validation/test로 분할  
+- **모델:** timm 라이브러리의 MobileNetV4 사용 (pretrained, 클래스 수에 맞게 출력층 수정)  
+- **옵티마이저:** Adam과 AdamW 선택, 가중치 감쇠 옵션 제공  
+- **학습:** tqdm 진행바, gradient clipping, 손실 튀는 경우 체크, early stopping 적용  
+- **평가:** 테스트 시 Confusion Matrix 시각화 및 Accuracy, Precision, Recall, F1, elapsed time 측정
+
+---
+
+아래는 전체 코드입니다:
 
 ```python
 import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,7 +27,7 @@ import timm  # timm 라이브러리를 통해 모델 생성
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_score, recall_score, f1_score
 
 # -----------------------------
 # 1. 하이퍼파라미터 및 옵션 설정
@@ -26,10 +36,10 @@ data_dir = './data'  # 직접 촬영한 사진들을 클래스별로 하위 폴�
 batch_size = 32
 num_epochs = 50
 learning_rate = 1e-4
-patience = 5  # 검증 성능 개선이 없을 경우 몇 에폭 기다릴지
+patience = 5  # 검증 성능 개선이 없을 경우 기다릴 에폭 수
 optimizer_choice = 'adam'  # 'adam' 또는 'adamw' 선택
 use_weight_decay = True  # 가중치 감쇠 사용 여부 (True/False)
-weight_decay_value = 1e-4 if use_weight_decay else 0.0  # 가중치 감쇠 값 (사용하지 않으면 0)
+weight_decay_value = 1e-4 if use_weight_decay else 0.0  # 가중치 감쇠 값 (미사용 시 0)
 max_grad_norm = 5.0  # gradient clipping 최대 norm
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 seed = 42
@@ -38,7 +48,7 @@ torch.manual_seed(seed)
 # -----------------------------
 # 2. 데이터셋 및 데이터 로더 구성
 # -----------------------------
-# 이미지 전처리: 학습 시 데이터 증강, 검증/테스트 시에는 단순 변환 적용
+# 학습 시 데이터 증강 적용, 검증/테스트 시에는 단순 전처리만 적용
 train_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
@@ -51,7 +61,7 @@ test_transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406],  std=[0.229, 0.224, 0.225])
 ])
 
-# 직접 촬영한 이미지들을 폴더별로 분류해두었다고 가정하고 ImageFolder를 사용
+# 직접 촬영한 이미지들을 폴더별로 분류해두었다고 가정하고 ImageFolder 사용
 full_dataset = datasets.ImageFolder(root=data_dir, transform=train_transform)
 
 # 데이터셋을 훈련, 검증, 테스트로 분할 (예: 70% 훈련, 15% 검증, 15% 테스트)
@@ -63,7 +73,7 @@ test_size = total_size - train_size - val_size
 train_dataset, val_dataset, test_dataset = random_split(full_dataset, [train_size, val_size, test_size],
                                                         generator=torch.Generator().manual_seed(seed))
 
-# 검증과 테스트 데이터는 transform 변경 (augmentation 없이)
+# 검증과 테스트 데이터에는 augmentation 없이 test_transform 적용
 val_dataset.dataset.transform = test_transform
 test_dataset.dataset.transform = test_transform
 
@@ -76,7 +86,7 @@ test_loader  = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, nu
 # 3. 모델 생성 (timm 이용, MobileNetV4)
 # -----------------------------
 num_classes = len(full_dataset.classes)
-# pretrained 모델을 불러오고, 마지막 FC 레이어를 num_classes에 맞게 설정
+# pretrained 모델 불러오고, 마지막 FC 레이어를 num_classes에 맞게 설정
 model = timm.create_model('mobilenetv4_100', pretrained=True, num_classes=num_classes)
 model = model.to(device)
 
@@ -108,13 +118,13 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch):
         outputs = model(inputs)
         loss = criterion(outputs, targets)
         
-        # 손실 값이 NaN이거나 너무 크게 튀면 업데이트하지 않음
+        # 손실 값이 NaN이거나 너무 크면 업데이트 건너뛰기
         if torch.isnan(loss) or loss.item() > 1e3:
             print(f"Warning: Loss spike detected at batch {batch_idx} with loss {loss.item()}. Skipping update.")
             continue
         
         loss.backward()
-        # Gradient clipping을 적용하여 loss 튀는 현상을 방지
+        # Gradient clipping 적용
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
         
@@ -185,7 +195,7 @@ for epoch in range(1, num_epochs+1):
         best_val_loss = val_loss
         best_epoch = epoch
         early_stop_counter = 0
-        # 검증 성능이 가장 좋았을 때 모델 저장
+        # 검증 성능이 가장 좋을 때 모델 저장
         torch.save(model.state_dict(), best_model_path)
         print("Best model saved.")
     else:
@@ -199,10 +209,27 @@ for epoch in range(1, num_epochs+1):
 print(f"\nTraining finished. Best validation loss at epoch {best_epoch}.")
 
 # -----------------------------
-# 7. 저장된 모델 로드 및 테스트 수행
+# 7. 저장된 모델 로드 및 테스트 수행 (평가 metric 측정)
 # -----------------------------
 model.load_state_dict(torch.load(best_model_path))
+
+# 테스트 시작 시간 기록
+start_time = time.time()
 true_labels, pred_labels = test(model, test_loader, device)
+elapsed_time = time.time() - start_time
+
+# 평가 metric 계산 (멀티 클래스의 경우 macro average 사용)
+test_accuracy  = accuracy_score(true_labels, pred_labels)
+test_precision = precision_score(true_labels, pred_labels, average='macro', zero_division=0)
+test_recall    = recall_score(true_labels, pred_labels, average='macro', zero_division=0)
+test_f1        = f1_score(true_labels, pred_labels, average='macro', zero_division=0)
+
+print("\n--- Test Metrics ---")
+print(f"Test Accuracy : {test_accuracy:.4f}")
+print(f"Test Precision: {test_precision:.4f}")
+print(f"Test Recall   : {test_recall:.4f}")
+print(f"Test F1 Score : {test_f1:.4f}")
+print(f"Elapsed Time  : {elapsed_time:.2f} seconds")
 
 # -----------------------------
 # 8. Confusion Matrix 그리기
@@ -242,40 +269,30 @@ plt.show()
 
 ---
 
-## 코드 주요 내용에 대한 설명
+## 코드 주요 내용에 대한 추가 설명
 
 1. **데이터셋 구성 및 전처리**  
-   - `datasets.ImageFolder`를 사용하여, 직접 촬영한 이미지를 클래스별 폴더 구조로 구성한 데이터셋을 불러옵니다.  
-   - 학습 데이터에는 데이터 증강(transformations) (예, RandomHorizontalFlip)을 적용하고, 검증/테스트 데이터에는 동일한 크기 조정 및 정규화만 적용합니다.  
-   - 전체 데이터셋을 70% 훈련, 15% 검증, 15% 테스트로 나누어 사용합니다.
+   - `datasets.ImageFolder`를 통해 직접 촬영한 이미지를 불러오며, 데이터 증강은 학습용에 적용하고 검증/테스트용에는 단순 크기 조정 및 정규화만 수행합니다.
+   - 전체 데이터셋을 70% 훈련, 15% 검증, 15% 테스트로 분할하여 사용합니다.
 
-2. **모델 생성 (timm 사용)**  
-   - `timm.create_model`을 사용하여 MobileNetV4 모델을 불러오며, `num_classes`를 데이터셋에 맞게 조정합니다.  
-   - pretrained 파라미터를 True로 하여 사전학습된 가중치를 사용합니다.
+2. **모델 생성 및 옵티마이저**  
+   - timm 라이브러리의 `mobilenetv4_100` 모델을 사용하며, pretrained 가중치를 불러와 최종 출력층을 데이터셋 클래스 수에 맞게 재구성합니다.
+   - Adam과 AdamW 두 가지 옵티마이저 중 선택할 수 있으며, 가중치 감쇠 옵션을 통해 정규화를 적용할 수 있습니다.
 
-3. **옵티마이저 및 가중치 감쇠 옵션**  
-   - 두 가지 옵티마이저 (Adam, AdamW)를 선택할 수 있으며, 변수 `optimizer_choice`를 통해 결정합니다.  
-   - `use_weight_decay` 플래그에 따라 가중치 감쇠를 적용하거나 생략합니다.
+3. **학습 루프 및 Early Stopping**  
+   - 각 에폭마다 tqdm 진행바로 학습/검증 과정을 확인할 수 있으며, gradient clipping과 손실 NaN 체크를 통해 안정적인 학습을 도모합니다.
+   - 검증 손실이 개선되지 않을 경우 early stopping을 적용하며, 최적 모델을 저장합니다.
 
-4. **학습 및 검증 루프, tqdm 진행바 적용**  
-   - 각 에폭마다 훈련 및 검증 루프를 진행하며, tqdm 라이브러리를 사용하여 진행상황을 실시간으로 확인할 수 있도록 하였습니다.  
-   - 손실이 NaN이거나 너무 큰 경우(예: 1e3 이상의 값) 업데이트를 건너뛰도록 하여 손실이 튀는 경우에 대한 대비책을 마련하였습니다.  
-   - gradient clipping(`torch.nn.utils.clip_grad_norm_`)을 적용하여 손실 값 튀는 현상을 방지합니다.
+4. **평가 및 성능 지표 측정**  
+   - 테스트 단계에서 모델 예측 결과를 기반으로 Accuracy, Precision, Recall, F1 score를 계산하고, 테스트 소요 시간(elapsed time)을 측정합니다.
+   - sklearn의 metric 함수들을 사용하며, 멀티 클래스 문제에서는 `average='macro'` 옵션을 적용합니다.
+   - Confusion Matrix도 시각화하여 모델의 분류 성능을 직관적으로 확인할 수 있습니다.
 
-5. **Early Stopping**  
-   - 검증 손실이 개선되지 않는 경우 `patience` 수 만큼 에폭을 기다린 후 학습을 중단하며, 이때 검증 성능이 가장 좋았던 시점의 모델 가중치를 저장합니다.
+5. **학습 및 검증 과정 시각화**  
+   - 에폭 별 훈련 손실, 검증 손실 및 정확도 변화를 그래프로 출력하여 학습 과정을 모니터링합니다.
 
-6. **테스트 및 Confusion Matrix**  
-   - 학습 완료 후 저장된 최적 모델을 로드하여 테스트 데이터에 대해 평가한 후, sklearn의 confusion matrix 기능을 사용하여 결과를 시각화합니다.
-
-7. **그래프 출력**  
-   - 에폭마다 기록된 훈련 손실, 검증 손실 및 검증 정확도를 matplotlib을 사용하여 그래프로 그려 학습 과정을 한눈에 파악할 수 있도록 하였습니다.
-
-이 코드는 PyTorch, timm, torchvision, tqdm, matplotlib, scikit-learn 등의 라이브러리를 사용하므로, 사용 전 필요한 라이브러리를 `pip install timm torchvision tqdm matplotlib scikit-learn` 등으로 설치해 주시기 바랍니다.
-
-자세한 내용이나 추가 문의사항이 있으시면 언제든지 말씀해 주세요.  
-  
 **참고 자료:**  
 - [PyTorch 공식 문서](https://pytorch.org/docs/stable/index.html)  
 - [timm GitHub 저장소](https://github.com/rwightman/pytorch-image-models)  
-- [tqdm GitHub](https://github.com/tqdm/tqdm)
+- [tqdm GitHub](https://github.com/tqdm/tqdm)  
+
