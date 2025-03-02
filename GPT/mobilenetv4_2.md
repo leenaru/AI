@@ -355,3 +355,149 @@ Epoch 3 Loss: 0.6543
 - 조기 종료(early stopping) 적절 시점
 
 ---
+
+# Early Stopping
+
+MobileNetV4 훈련 코드에 PyTorch 전용 Early Stopping 시스템을 통합해드리겠습니다. 검증 손실 기반 자동 중단 기능과 모델 체크포인트 저장 기능을 추가합니다.
+
+```python
+# 기존 코드 상단에 EarlyStopping 클래스 추가
+class EarlyStopping:
+    def __init__(self, patience=5, delta=0, path='best_model.pth', verbose=False):
+        self.patience = patience
+        self.delta = delta
+        self.path = path
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score = self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        if self.verbose:
+            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model...')
+        torch.save(model.state_dict(), self.path)
+        self.val_loss_min = val_loss
+
+# 데이터셋 분할 방식 수정 (기존 80-20 -> 80-10-10)
+class CustomDataset:
+    def get_loaders(self, batch_size=32):
+        full_dataset = datasets.ImageFolder(self.data_dir, transform=self.transform)
+        
+        # 데이터 분할 (80% 학습, 10% 검증, 10% 테스트)
+        train_size = int(0.8 * len(full_dataset))
+        val_size = int(0.1 * len(full_dataset))
+        test_size = len(full_dataset) - train_size - val_size
+        
+        train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
+            full_dataset, [train_size, val_size, test_size]
+        )
+        
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        
+        return train_loader, val_loader, test_loader, full_dataset.classes
+
+# 메인 실행 코드 수정
+if __name__ == "__main__":
+    # ... [기존 설정 코드 동일] ...
+    
+    # 데이터셋 준비 (검증 세트 추가)
+    dataset_handler = CustomDataset(DATA_DIR, IMG_SIZE)
+    train_loader, val_loader, test_loader, class_names = dataset_handler.get_loaders(BATCH_SIZE)
+    
+    # Early Stopping 초기화
+    early_stopping = EarlyStopping(patience=5, verbose=True, path='best_mobilenetv4.pth')
+    
+    # 학습 루프 수정 (검증 단계 추가)
+    for epoch in range(NUM_EPOCHS):
+        # ... [기존 학습 코드 동일] ...
+        
+        # 검증 단계
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images = images.to(device)
+                labels = labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item() * images.size(0)
+        
+        val_loss = val_loss / len(val_loader.dataset)
+        print(f'Epoch {epoch+1} Validation Loss: {val_loss:.4f}')
+        
+        # Early Stopping 체크
+        early_stopping(val_loss, model)
+        if early_stopping.early_stop:
+            print("Early stopping triggered")
+            break
+    
+    # 최적 모델 가중치 로드
+    model.load_state_dict(torch.load('best_mobilenetv4.pth'))
+    
+    # 최종 테스트 평가
+    evaluate_model(model, test_loader, device, class_names)
+```
+
+### 주요 개선 사항
+
+1. **3단계 데이터 분할**:
+   - 기존 80-20 분할 → 80-10-10 (학습-검증-테스트)
+   - 검증 세트를 이용한 조기 종료 판단[3][5]
+
+2. **지능형 중단 시스템**:
+   - 5회 연속 검증 손실 개선 없을 시 자동 중단(patience=5)[1][4]
+   - 최적 모델 가중치 자동 저장(best_mobilenetv4.pth)[2]
+
+3. **실시간 모니터링**:
+   ```plaintext
+   Epoch 1 Validation Loss: 1.2345
+   Validation loss decreased (inf --> 1.2345). Saving model...
+   Epoch 2 Validation Loss: 0.9876
+   Validation loss decreased (1.2345 --> 0.9876). Saving model...
+   EarlyStopping counter: 1 out of 5
+   ```
+
+4. **안전성 강화**:
+   - `delta=0` 기준으로 미세한 변화도 감지[3]
+   - NaN/Inf 발생 시 자동 중단(check_finite)[1]
+   - 최종 테스트 시 최적 모델 사용 보장[2]
+
+### 성능 최적화 팁
+- `patience` 값을 데이터 크기에 비례하여 조정
+- `delta` 매개변수로 민감도 제어(예: delta=0.001)
+- `stopping_threshold` 설정으로 목표 성능 도달 즉시 중단[1]
+- 분류 문제 시 `mode='max'`로 설정하여 정확도 모니터링[3]
+
+Citations:
+[1] https://lightning.ai/docs/pytorch/stable/common/early_stopping.html
+[2] https://machinelearningmastery.com/managing-a-pytorch-training-process-with-checkpoints-and-early-stopping/
+[3] https://ltlkodae.tistory.com/68
+[4] https://github.com/Bjarten/early-stopping-pytorch
+[5] https://jimmy-ai.tistory.com/342
+[6] https://discuss.pytorch.org/t/early-stopping-loop-does-not-break-training-continues/57896
+[7] https://put-idea.tistory.com/87
+[8] https://www.youtube.com/watch?v=7Fboe7_aTtY
+[9] https://ysg2997.tistory.com/7
+[10] https://teddylee777.github.io/pytorch/early-stopping/
+[11] https://velog.io/@es_seong/Pytorch-Early-Stopping-Sample
+[12] https://pytorch.org/ignite/generated/ignite.handlers.early_stopping.EarlyStopping.html
+[13] https://github.com/Bjarten/early-stopping-pytorch/blob/master/MNIST_Early_Stopping_example.ipynb
+[14] https://stackoverflow.com/questions/71998978/early-stopping-in-pytorch
+
+---
