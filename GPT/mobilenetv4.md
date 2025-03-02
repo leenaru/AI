@@ -130,6 +130,31 @@ Citations:
 [20] https://team.gynetworks.com/e0ec8788-3674-4a06-bbb6-bc2ecd32e148
 
 ---
+```python
+def evaluate_model(model, dataloader, test_dataset):
+    # ... 기존 코드 ...
+    
+    # 실제 발견된 고유 클래스 인덱스 확인
+    unique_classes = sorted(set(all_targets))
+    
+    # 클래스 인덱스와 이름 매핑 확인
+    if len(unique_classes) != len(test_dataset.classes):
+        print(f"경고: 발견된 클래스 수({len(unique_classes)})와 dataset.classes의 수({len(test_dataset.classes)})가 일치하지 않습니다.")
+        
+        # 방법 1: 실제 사용된 클래스에 해당하는 이름만 추출
+        used_class_names = [test_dataset.classes[i] for i in unique_classes if i < len(test_dataset.classes)]
+        
+        # 방법 2: 인덱스-클래스명 매핑 재구성
+        class_idx_to_name = {idx: name for idx, name in enumerate(test_dataset.classes)}
+        matched_names = [class_idx_to_name.get(idx, f"Unknown-{idx}") for idx in unique_classes]
+        
+        print("\nClassification Report:")
+        print(classification_report(all_targets, all_preds, labels=unique_classes, target_names=matched_names))
+    else:
+        print("\nClassification Report:")
+        print(classification_report(all_targets, all_preds, target_names=test_dataset.classes))
+```
+
 ---
 ---
 데이터셋을 직접 촬영한 사진으로 구성하고 사용하기 위해 다음 단계를 따라 진행할 수 있습니다. 주의: 먼저 `pip install torch torchvision pillow` 명령으로 필수 패키지를 설치해야 합니다.
