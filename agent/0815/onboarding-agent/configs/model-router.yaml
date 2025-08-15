@@ -1,0 +1,7 @@
+ollama:
+  base_url: http://ollama:11434
+  model: llama3
+vllm:
+  base_url: http://vllm:8000/v1
+  model: qwen72b
+prefer: ["ollama", "vllm"]

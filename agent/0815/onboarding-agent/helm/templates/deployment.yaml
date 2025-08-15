@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: onboarding-agent
+  template:
+    metadata:
+      labels:
+        app: onboarding-agent
+    spec:
+      containers:
+        - name: api
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: APP_CONFIG
+              value: {{ .Values.env.APP_CONFIG }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: onboarding-agent-config

@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: onboarding-agent
+  annotations: {}
+spec:
+  rules:
+    - host: onboarding-agent.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: onboarding-agent
+                port:
+                  number: {{ .Values.service.port }}

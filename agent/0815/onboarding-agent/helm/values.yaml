@@ -1,0 +1,11 @@
+image:
+  repository: ghcr.io/example/onboarding-agent
+  tag: v0.1.0
+service:
+  type: ClusterIP
+  port: 8000
+env:
+  APP_CONFIG: /config/app.yaml
+volumes:
+  - name: config
+    mountPath: /config

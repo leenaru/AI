@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: onboarding-agent-config
+data:
+  app.yaml: |
+    # Provide your app config here or mount a file
