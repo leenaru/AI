@@ -1,0 +1,9 @@
+// module.modulemap (TEMPLATE) -- only needed if you choose a System Library target instead of C target.
+// Place this file as 'module.modulemap' and create a Package.swift with .systemLibrary target.
+// For the current C target setup, this file is not required.
+//
+// Usage (System Library mode):
+// module CLlamaBridge {
+//   header "llama_bridge.h"
+//   export * 
+// }

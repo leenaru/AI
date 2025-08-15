@@ -1,0 +1,32 @@
+server:
+  host: 0.0.0.0
+  port: 8000
+  log_config: configs/logging.yaml
+stores:
+  valkey_url: "redis://valkey:6379/0"
+  postgres_dsn: "postgresql://postgres:postgres@postgres:5432/agent"
+  s3:
+    endpoint_url: "http://minio:9000"
+    bucket: "ai-vision-temp"
+    access_key: "minio"
+    secret_key: "minio123"
+    secure: false
+models:
+  router: configs/model-router.yaml
+rag:
+  graph_store: { type: parquet, path: data/parquet/ }
+  index:
+    type: faiss
+    factory: hnsw
+    params: { dim: 768, hnsw: { M: 32, efConstruction: 200 } }
+  ingest: { unit_summary: true, incremental: true }
+  retrieval: { k_dense: 40, k_sparse: 40, k_graph: 2 }
+  merge:
+    formula: "alpha*dense + beta*bm25 + gamma*graph + delta*recency"
+    weights: { alpha: 0.55, beta: 0.25, gamma: 0.15, delta: 0.05 }
+    cross_encoder: { enabled: true, top_m: 10, model: "BAAI/bge-reranker-v2-m3" }
+local_gate:
+  thresholds: { low: 0.45, high: 0.75 }
+  require_tools: { troubleshooting: true, device_registration: true, smalltalk: false }
+  redact: { pii: ["phone","address","email"] }
+  clip: { max_chars: 800, keep_slots: true }
