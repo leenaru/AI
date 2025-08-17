@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HQ-RAG vs. GraphRAG: 대화형 분석</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Calm Harmony (Warm Neutrals with Muted Teal/Slate Accents) -->
+    <!-- Application Structure Plan: A tabbed SPA with four sections: 1) Overview, 2) Side-by-side Deep Dive Comparison, 3) Interactive Performance Radar Chart, 4) Interactive Use Case Explorer. This structure breaks down a dense technical report into digestible, user-driven segments, prioritizing comparison and practical application over a linear reading experience. -->
+    <!-- Visualization & Content Choices: Report Info: Performance Trade-offs -> Goal: Compare -> Viz: Radar Chart -> Interaction: Hover tooltips -> Justification: Effectively visualizes multi-dimensional trade-offs between the two technologies -> Library: Chart.js. Report Info: Use Cases -> Goal: Guide -> Presentation: Interactive filter buttons -> Interaction: Click to reveal recommended tech -> Justification: Turns a static list into an engaging, decision-support tool -> Method: Vanilla JS. CONFIRMATION: NO SVG/Mermaid used. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #FDFBF8;
+            color: #383838;
+        }
+        .nav-btn {
+            transition: all 0.3s ease;
+        }
+        .nav-btn.active {
+            background-color: #0D9488;
+            color: #ffffff;
+            font-weight: 700;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .card {
+            background-color: #FFFFFF;
+            border: 1px solid #F0EBE3;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+        }
+        .use-case-btn.active {
+            background-color: #14B8A6;
+            color: white;
+            transform: scale(1.05);
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div class="container mx-auto px-4 py-8 md:py-12">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl md:text-5xl font-bold text-teal-800 mb-2">HQ-RAG vs. GraphRAG</h1>
+            <p class="text-lg text-slate-600">대화형 기술 분석: LLM 성능 향상을 위한 두 가지 접근법</p>
+        </header>
+
+        <nav class="flex justify-center mb-12 bg-stone-100 p-2 rounded-full shadow-inner">
+            <button data-target="overview" class="nav-btn active px-4 py-2 md:px-6 md:py-3 rounded-full text-sm md:text-base font-medium text-slate-700">개요</button>
+            <button data-target="comparison" class="nav-btn px-4 py-2 md:px-6 md:py-3 rounded-full text-sm md:text-base font-medium text-slate-700">심층 비교</button>
+            <button data-target="performance" class="nav-btn px-4 py-2 md:px-6 md:py-3 rounded-full text-sm md:text-base font-medium text-slate-700">성능 시각화</button>
+            <button data-target="use-cases" class="nav-btn px-4 py-2 md:px-6 md:py-3 rounded-full text-sm md:text-base font-medium text-slate-700">사용 사례 탐색</button>
+        </nav>
+
+        <main>
+            <section id="overview" class="content-section active">
+                <div class="max-w-4xl mx-auto">
+                    <div class="card p-8 mb-8">
+                        <h2 class="text-2xl font-bold text-teal-700 mb-4">검색 증강 생성(RAG)이란?</h2>
+                        <p class="text-slate-700 leading-relaxed">
+                            RAG는 대규모 언어 모델(LLM)이 답변을 생성할 때 외부의 최신 정보 소스를 실시간으로 검색하고 참고하는 기술입니다. 이를 통해 LLM이 가진 사전 학습 데이터의 한계를 극복하고, '환각(Hallucination)' 현상을 줄여 더 정확하고 신뢰도 높은 답변을 생성할 수 있습니다. 이 애플리케이션에서는 RAG를 더욱 발전시킨 두 가지 핵심 접근법, **HQ-RAG**와 **GraphRAG**를 심층적으로 비교 분석합니다.
+                        </p>
+                    </div>
+                    <div class="grid md:grid-cols-2 gap-8">
+                        <div class="card p-8">
+                            <h3 class="text-xl font-bold text-slate-800 mb-3">🚀 HQ-RAG (고품질 RAG)</h3>
+                            <p class="text-slate-600">
+                                비정형 텍스트(문서, 웹페이지 등)를 중심으로 **의미론적 유사성**을 통해 정보를 검색합니다. 검색된 정보의 품질을 높이기 위해 재순위화, 필터링 등 고급 기술을 사용하여 LLM에 최적의 컨텍스트를 제공하는 데 중점을 둡니다.
+                            </p>
+                        </div>
+                        <div class="card p-8">
+                            <h3 class="text-xl font-bold text-slate-800 mb-3">🕸️ GraphRAG</h3>
+                            <p class="text-slate-600">
+                                정보를 개체(노드)와 관계(엣지)로 구조화한 **지식 그래프**를 사용합니다. 단순한 텍스트 검색을 넘어, 데이터 간의 복잡한 관계와 연결을 탐색하여 심층적인 추론을 수행하는 데 특화되어 있습니다.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="comparison" class="content-section">
+                <div class="text-center mb-8">
+                     <h2 class="text-3xl font-bold text-teal-800">기술 심층 비교</h2>
+                     <p class="text-slate-600 mt-2">두 기술이 정보를 처리하고 활용하는 방식의 핵심적인 차이점을 살펴보세요.</p>
+                </div>
+                <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div class="card p-6">
+                        <h3 class="text-lg font-bold mb-3 text-center text-slate-800">데이터 표현</h3>
+                        <div class="text-sm">
+                            <p class="font-semibold text-teal-700 mb-1">HQ-RAG</p>
+                            <p class="text-slate-600">주로 비정형 텍스트 덩어리를 벡터 임베딩으로 변환하여 저장합니다.</p>
+                            <hr class="my-4">
+                            <p class="font-semibold text-teal-700 mb-1">GraphRAG</p>
+                            <p class="text-slate-600">엔티티와 관계를 명시적으로 표현하는 구조화된 지식 그래프를 사용합니다.</p>
+                        </div>
+                    </div>
+                    <div class="card p-6">
+                        <h3 class="text-lg font-bold mb-3 text-center text-slate-800">검색 메커니즘</h3>
+                         <div class="text-sm">
+                            <p class="font-semibold text-teal-700 mb-1">HQ-RAG</p>
+                            <p class="text-slate-600">의미론적 유사성에 기반한 밀집 벡터 검색을 핵심으로 사용합니다.</p>
+                            <hr class="my-4">
+                            <p class="font-semibold text-teal-700 mb-1">GraphRAG</p>
+                            <p class="text-slate-600">그래프 탐색을 통해 노드 간의 관계를 추적하며 정보를 찾습니다.</p>
+                        </div>
+                    </div>
+                    <div class="card p-6">
+                        <h3 class="text-lg font-bold mb-3 text-center text-slate-800">추론 능력</h3>
+                         <div class="text-sm">
+                            <p class="font-semibold text-teal-700 mb-1">HQ-RAG</p>
+                            <p class="text-slate-600">검색된 텍스트에서 직접 정보를 추출하는 단일 홉(Single-hop) 추론에 강합니다.</p>
+                            <hr class="my-4">
+                            <p class="font-semibold text-teal-700 mb-1">GraphRAG</p>
+                            <p class="text-slate-600">여러 데이터 포인트를 연결하는 복잡한 다중 홉(Multi-hop) 추론이 가능합니다.</p>
+                        </div>
+                    </div>
+                    <div class="card p-6">
+                        <h3 class="text-lg font-bold mb-3 text-center text-slate-800">핵심 장점</h3>
+                         <div class="text-sm">
+                            <p class="font-semibold text-teal-700 mb-1">HQ-RAG</p>
+                            <p class="text-slate-600">빠른 응답 속도, 비정형 데이터 처리 용이성, 비교적 낮은 구현 복잡도.</p>
+                            <hr class="my-4">
+                            <p class="font-semibold text-teal-700 mb-1">GraphRAG</p>
+                            <p class="text-slate-600">높은 추론 정확도, 관계 기반의 깊은 이해, 추론 과정의 시각화 및 해석 가능성.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="performance" class="content-section">
+                <div class="text-center mb-8">
+                     <h2 class="text-3xl font-bold text-teal-800">성능 특성 시각화</h2>
+                     <p class="text-slate-600 mt-2">두 기술의 주요 성능 지표를 한눈에 비교해 보세요. (값이 높을수록 우수)</p>
+                </div>
+                <div class="card p-4 md:p-8">
+                    <div class="chart-container">
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section id="use-cases" class="content-section">
+                 <div class="text-center mb-10">
+                     <h2 class="text-3xl font-bold text-teal-800">사용 사례 탐색기</h2>
+                     <p class="text-slate-600 mt-2">특정 요구사항이나 시나리오를 선택하여 가장 적합한 기술을 확인해 보세요.</p>
+                </div>
+                <div class="flex flex-wrap justify-center gap-3 mb-8">
+                    <button class="use-case-btn active px-4 py-2 bg-white border border-stone-300 rounded-full shadow-sm transition-all duration-300 hover:bg-stone-100" data-usecase="all">전체 보기</button>
+                    <button class="use-case-btn px-4 py-2 bg-white border border-stone-300 rounded-full shadow-sm transition-all duration-300 hover:bg-stone-100" data-usecase="hq">빠른 응답 속도</button>
+                    <button class="use-case-btn px-4 py-2 bg-white border border-stone-300 rounded-full shadow-sm transition-all duration-300 hover:bg-stone-100" data-usecase="graph">복잡한 관계 추론</button>
+                    <button class="use-case-btn px-4 py-2 bg-white border border-stone-300 rounded-full shadow-sm transition-all duration-300 hover:bg-stone-100" data-usecase="hq">비정형 문서 처리</button>
+                    <button class="use-case-btn px-4 py-2 bg-white border border-stone-300 rounded-full shadow-sm transition-all duration-300 hover:bg-stone-100" data-usecase="graph">높은 해석 가능성</button>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-8">
+                    <div class="use-case-card card p-8" data-type="hq">
+                        <h3 class="text-2xl font-bold text-slate-800 mb-4">✅ 추천: HQ-RAG</h3>
+                        <ul class="space-y-3 text-slate-600 list-disc list-inside">
+                            <li><strong class="text-slate-700">고객 지원 챗봇:</strong> 사용자의 질문에 신속하고 정확한 답변을 제공해야 할 때.</li>
+                            <li><strong class="text-slate-700">문서 요약 및 검색:</strong> 방대한 양의 텍스트에서 핵심 정보를 빠르게 찾아 요약할 때.</li>
+                            <li><strong class="text-slate-700">최신 뉴스 기반 Q&A:</strong> 자주 업데이트되는 정보를 기반으로 질문에 답해야 할 때.</li>
+                        </ul>
+                    </div>
+                    <div class="use-case-card card p-8" data-type="graph">
+                        <h3 class="text-2xl font-bold text-slate-800 mb-4">✅ 추천: GraphRAG</h3>
+                        <ul class="space-y-3 text-slate-600 list-disc list-inside">
+                            <li><strong class="text-slate-700">의료 진단 보조:</strong> 환자 기록, 증상, 연구 논문 간의 복잡한 관계를 분석하여 진단을 도울 때.</li>
+                            <li><strong class="text-slate-700">법률 연구 및 판례 분석:</strong> 법률 조항과 판례들 사이의 인과 관계 및 연결고리를 추적할 때.</li>
+                            <li><strong class="text-slate-700">공급망 리스크 분석:</strong> 여러 공급업체와 물류 경로 간의 잠재적 문제를 다각도로 분석할 때.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const navButtons = document.querySelectorAll('.nav-btn');
+            const contentSections = document.querySelectorAll('.content-section');
+            const useCaseButtons = document.querySelectorAll('.use-case-btn');
+            const useCaseCards = document.querySelectorAll('.use-case-card');
+
+            function switchTab(targetId) {
+                navButtons.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.target === targetId);
+                });
+                contentSections.forEach(section => {
+                    section.classList.toggle('active', section.id === targetId);
+                });
+            }
+
+            navButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    switchTab(button.dataset.target);
+                });
+            });
+
+            useCaseButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const usecase = button.dataset.usecase;
+                    
+                    useCaseButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+
+                    useCaseCards.forEach(card => {
+                        if (usecase === 'all' || card.dataset.type === usecase) {
+                            card.style.display = 'block';
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+                });
+            });
+
+            const ctx = document.getElementById('performanceChart').getContext('2d');
+            const performanceChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: ['복잡한 쿼리 정확도', '구현 용이성', '자원 효율성', '응답 속도', '해석 가능성'],
+                    datasets: [{
+                        label: 'HQ-RAG',
+                        data: [3, 4, 4, 5, 2],
+                        backgroundColor: 'rgba(13, 148, 136, 0.2)',
+                        borderColor: 'rgba(13, 148, 136, 1)',
+                        pointBackgroundColor: 'rgba(13, 148, 136, 1)',
+                        pointBorderColor: '#fff',
+                        pointHoverBackgroundColor: '#fff',
+                        pointHoverBorderColor: 'rgba(13, 148, 136, 1)',
+                        borderWidth: 2
+                    }, {
+                        label: 'GraphRAG',
+                        data: [5, 2, 2, 3, 5],
+                        backgroundColor: 'rgba(75, 85, 99, 0.2)',
+                        borderColor: 'rgba(75, 85, 99, 1)',
+                        pointBackgroundColor: 'rgba(75, 85, 99, 1)',
+                        pointBorderColor: '#fff',
+                        pointHoverBackgroundColor: '#fff',
+                        pointHoverBorderColor: 'rgba(75, 85, 99, 1)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            angleLines: {
+                                color: '#E5E7EB'
+                            },
+                            grid: {
+                                color: '#E5E7EB'
+                            },
+                            pointLabels: {
+                                font: {
+                                    size: 12,
+                                    weight: '500'
+                                },
+                                color: '#4B5563'
+                            },
+                            ticks: {
+                                backdropColor: 'rgba(255, 255, 255, 0.75)',
+                                stepSize: 1,
+                                max: 5,
+                                min: 0
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    size: 14,
+                                    weight: '500'
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.r !== null) {
+                                        label += context.parsed.r + ' / 5';
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
