@@ -1,0 +1,36 @@
+version: "3.9"
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - ROUTER_MODEL=${ROUTER_MODEL:-qwen2.5:3b-instruct}
+      - GENERATOR_MODEL=${GENERATOR_MODEL:-llama3:8b-instruct}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-llama3:8b-instruct}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_data:/data  # sqlite 체크포인트 등 영속화
+
+volumes:
+  ollama:
+  app_data:
