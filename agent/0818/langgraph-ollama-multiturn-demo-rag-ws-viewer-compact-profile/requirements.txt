@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sse-starlette
+langgraph>=0.2.0
+langchain
+langchain-community
+ollama
+
+faiss-cpu
+networkx
+
+rank-bm25
+redis
+psycopg2-binary
+python-multipart
