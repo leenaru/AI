@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+sse-starlette
+langgraph>=0.2.0
+langchain
+langchain-community
+ollama
