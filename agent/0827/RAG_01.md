@@ -901,4 +901,132 @@ data = try_parse_json(resp.text) or heuristic_gate(query)
 * **모델 어댑터 레이어**에 **함수 호출/툴 사용 프롬프트**·**안전 라우팅(국가별 정책 오버레이)** 연계
 
 원하시면 위 레포에 바로 **FastAPI + UI + Adapter 라우팅**을 패치하여, 귀하의 온프레미스 환경(Ollama/vLLM)에서 곧장 운영 가능한 형태로 확장해 드리겠습니다.
- 
+
+
+---
+---
+---
+
+
+> 아래 내용 추가해줘
+> 
+> - BM25+FAISS 하이브리드 가중치 튜너(Grid/Hyperband) 추가
+> - 세션 캐시/재검색 정책(게이트 임계값), HyDE/다중 질의 RRF 융합 확장
+> - 모델 어댑터 레이어에 함수 호출/툴 사용 프롬프트·안전 라우팅(국가별 정책 오버레이) 연계
+
+# 요약
+
+요청하신 세 항목을 **완전 반영**해 새 버전으로 정리했습니다.
+
+* **BM25+FAISS 하이브리드 가중치 튜너(Grid/Hyperband)**: `tuner.py` (자동으로 `rrf/weighted` 융합과 `dense_w/bm25_w` 최적화)
+* **세션 캐시/재검색 정책(게이트 임계값), HyDE/다중 질의 RRF 융합**: `demo.py` 플래그 및 `session_cache.py`, `hyde_multiquery.py`
+* **모델 어댑터 레이어에 함수 호출/툴 프롬프트·안전 라우팅(국가별 정책 오버레이)**: `adapters/model_adapter.py` + `policies/policy_overlays.yaml`
+
+  * OpenAI-호환(vLLM) 경로에 **tools/tool\_choice**가 실제로 전달되도록 **완전 연결**해두었습니다.
+
+[📦 hr\_raptor\_adapter\_v3.zip 다운로드](sandbox:/mnt/data/hr_raptor_adapter_v3.zip)
+
+---
+
+## 자세한 설명
+
+### 1) BM25+FAISS 하이브리드 가중치 튜너
+
+* 파일: `tuner.py`
+* 방식:
+
+  1. **Grid**로 `alpha=dense_w ∈ {0.0, 0.25, 0.5, 0.75, 1.0}`와 `method ∈ {rrf, weighted}` 전역 탐색
+  2. 최적 부근을 **미세 탐색**(간단 Hyperband 스타일)
+* 메트릭(예시): top-1 후보 문단에 `keywords` 중 하나 이상 포함 여부(0/1). 실전에서는 **EM/F1**, **RAGAS**, 혹은 휴먼 라벨로 교체 권장.
+* 사용:
+
+```bash
+python tuner.py --artifacts ./artifacts --eval_file ./eval_set.jsonl --out_file tuner_results.json
+```
+
+* `demo.py` 실행 시 `tuner_results.json`이 존재하면 **자동 반영**(융합 방식/가중치).
+
+### 2) 세션 캐시 / 게이트 임계값 / HyDE·다중 질의 RRF 확장
+
+* **세션 캐시**: `session_cache.py` (TTL·간단 LRU)
+
+  * `demo.py`의 `--use_cache --cache_ttl 600`로 활성화
+  * key는 질의 재작성 조합 기준으로 구성
+* **재검색 정책(게이트 임계값)**:
+
+  * Self-RAG 게이트가 반환한 `k` 기반으로 `--gate_threshold` 이상이면 검색 수행
+  * 예) `--gate_threshold 5` → 게이트가 `k=4`면 검색 생략
+* **HyDE/다중 질의**: `hyde_multiquery.py`
+
+  * `--use_hyde --multiquery_n 2` 로 활성화 → LLM(또는 휴리스틱)로 가설 문단/질의 생성 → 기존 rewrites와 함께 **RRF/가중 융합**
+  * 비용/지연 제어를 위해 `multiquery_n`과 질의 길이 제한을 조절
+* 실행 예:
+
+```bash
+python demo.py --artifacts ./artifacts \
+  --query "E23 오류로 Wi-Fi 페어링이 중단될 때 어떻게 재시도하나요?" \
+  --use_selfrag --selfrag_backend heuristic \
+  --use_hyde --multiquery_n 2 \
+  --use_cache --cache_ttl 600 \
+  --fusion weighted --dense_w 0.6 --bm25_w 0.4 \
+  --use_cross --cross_model cross-encoder/ms-marco-MiniLM-L-6-v2
+```
+
+### 3) 어댑터 레이어: 함수 호출/툴 프롬프트 + 안전 라우팅(국가별 정책)
+
+* 파일: `adapters/model_adapter.py`
+
+  * **Ollama**: `/api/generate`
+  * **OpenAI-호환(vLLM 등)**: `/v1/chat/completions`
+  * `OpenAICompatClient.generate(...)`가 `tools`/`tool_choice` 파라미터를 **실제로 body에 포함**하도록 구현
+* **안전 라우팅**: `SafetyRouter`
+
+  * `policies/policy_overlays.yaml`의 국가 코드(KR/US 등)별 **system prefix**, **blocked\_tools** 사용
+  * `demo.py` 생성 단계에서 overlay 적용 후, **차단된 툴 자동 필터링**
+* 생성 단계 예:
+
+```bash
+python demo.py --artifacts ./artifacts \
+  --query "E23 오류..." \
+  --use_selfrag --selfrag_backend openai \
+  --llm_model qwen2.5-7b-instruct --llm_base_url http://127.0.0.1:8000/v1 --llm_api_key sk-xxx \
+  --use_hyde --multiquery_n 2 --use_cache \
+  --do_generate --gen_backend openai \
+  --policy_overlays ./policies/policy_overlays.yaml --country_code KR
+```
+
+---
+
+## 폴더 구조 요약
+
+```
+hr_raptor_adapter_v3/
+  README_ko.md
+  requirements.txt
+  sample_docs/
+  policies/
+    policy_overlays.yaml             # 국가별 정책 오버레이
+  adapters/
+    model_adapter.py                 # Ollama / OpenAI-호환 클라이언트 + SafetyRouter + tools 전달
+  raptor_tree.py                     # RAPTOR 요약 트리 빌더
+  retrieval_pipeline.py              # HR + RRF/가중 융합
+  selfrag_gating.py                  # Self-RAG 게이트(LLM/휴리스틱)
+  hyde_multiquery.py                 # HyDE/다중 질의 생성
+  session_cache.py                   # TTL 캐시
+  tuner.py                           # Grid/Hyperband 튜너
+  eval_set.jsonl                     # 예시 평가셋
+```
+
+---
+
+## 실무 팁
+
+* **튜너 메트릭**을 반드시 도메인용으로 교체(정답 라벨/루브릭).
+* **HyDE**는 품질 편차가 큽니다. 다중/가설 질의는 1\~3개 정도로 제한하고, Cross-리랭크로 **정밀 필터링**하세요.
+* **정책 오버레이**는 국가·제품군·규제 레벨별로 세분화 가능(예: `KR:home_appliance`, `KR:medical`, …).
+* **툴 사용**은 OpenAI-호환 백엔드에 최적화되어 있으니, 툴 결과 핸들러(예: `open_url`) 연결만 추가하면 **함수 호출 루프**로 확장할 수 있습니다.
+
+---
+
+필요하시면 **FastAPI + Web UI(출처 하이라이트/툴 버튼/스트리밍)**, **증분 인덱싱 파이프라인**, **다중 백엔드 비용/정책 기반 라우팅**까지 바로 확장해 드릴게요.
+
