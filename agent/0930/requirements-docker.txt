@@ -1,0 +1,206 @@
+# requirements.txt
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+websockets==12.0
+aiohttp==3.9.1
+
+# LangGraph & LangChain
+langgraph==0.0.28
+langchain==0.1.0
+langchain-core==0.1.0
+langchain-community==0.0.10
+
+# ML/AI
+numpy==1.24.3
+faiss-cpu==1.7.4
+rank-bm25==0.2.2
+networkx==3.2
+transformers==4.36.0
+torch==2.1.0
+
+# Streamlit
+streamlit==1.29.0
+streamlit-chat==0.1.1
+pillow==10.1.0
+
+# Database & Caching
+redis==5.0.1
+sqlalchemy==2.0.23
+
+# Monitoring & Logging
+langsmith==0.0.69
+python-dotenv==1.0.0
+
+# Utils
+python-multipart==0.0.6
+httpx==0.25.2
+
+---
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Ollama 서비스 (개발용 LLM)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: iot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: serve
+
+  # vLLM 서비스 (운영용 LLM)
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: iot-vllm
+    ports:
+      - "8001:8000"
+    volumes:
+      - model_cache:/root/.cache/huggingface
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: >
+      --model google/gemma-2b 
+      --host 0.0.0.0 
+      --port 8000
+      --max-model-len 2048
+
+  # Redis (캐싱)
+  redis:
+    image: redis:7-alpine
+    container_name: iot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # AI Agent 서버
+  agent-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: iot-agent-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server:/app
+      - logs:/app/logs
+    environment:
+      - MODEL_BACKEND=${MODEL_BACKEND:-OLLAMA}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - VLLM_BASE_URL=http://vllm:8000
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - ollama
+      - redis
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Streamlit UI
+  streamlit-ui:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: iot-streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./client:/app
+    environment:
+      - API_URL=http://agent-server:8000
+    depends_on:
+      - agent-server
+    command: streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+
+volumes:
+  ollama_data:
+  model_cache:
+  redis_data:
+  logs:
+
+---
+# server/Dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# 시스템 패키지 설치
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 패키지 설치
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 앱 코드 복사
+COPY . .
+
+# 포트 노출
+EXPOSE 8000
+
+# 실행 명령
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+---
+# client/Dockerfile  
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Streamlit 관련 패키지 설치
+RUN pip install --no-cache-dir \
+    streamlit==1.29.0 \
+    requests==2.31.0 \
+    websocket-client==1.6.4 \
+    pillow==10.1.0
+
+# 앱 코드 복사
+COPY . .
+
+# 포트 노출
+EXPOSE 8501
+
+# 실행 명령
+CMD ["streamlit", "run", "streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+
+---
+# .env
+# Model Settings
+MODEL_BACKEND=OLLAMA
+MODEL_NAME=gemma2:2b
+EMBEDDING_DIM=768
+
+# API Keys (Optional)
+OPENAI_API_KEY=
+HUGGING_FACE_HUB_TOKEN=
+LANGSMITH_API_KEY=
+
+# Server Settings
+LOG_LEVEL=INFO
+DEBUG=False
+
+# URLs
+OLLAMA_BASE_URL=http://localhost:11434
+VLLM_BASE_URL=http://localhost:8001
+REDIS_URL=redis://localhost:6379
